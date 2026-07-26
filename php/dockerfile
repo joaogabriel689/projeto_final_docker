@@ -1,0 +1,18 @@
+FROM php:8.3-fpm
+
+WORKDIR /var/www/html
+
+
+
+RUN groupadd -g 1000 appuser && \
+    useradd -u 1000 -g appuser -m appuser
+
+
+COPY --chown=appuser:appuser . .
+
+
+USER appuser
+
+EXPOSE 9000
+
+CMD ["php-fpm"]
