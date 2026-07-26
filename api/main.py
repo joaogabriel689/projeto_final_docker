@@ -20,8 +20,13 @@ def get_db():
 
 
 @app.get("/", response_model=List[SeriesSchema])
-async def read_root(db: Session = Depends(get_db)):
-    series = db.query(Series).all()
+async def read_root(skip: int = 0, limit: int = 100, genero: str = None, ano_lancamento: int = None, db: Session = Depends(get_db)):
+    query = db.query(Series)
+    if genero:
+        query = query.filter(Series.genero == genero)
+    if ano_lancamento:
+        query = query.filter(Series.ano_lancamento == ano_lancamento)
+    series = query.offset(skip).limit(limit).all()
     return series
 
 
@@ -65,3 +70,8 @@ async def delete_series(series_id: int, db: Session = Depends(get_db)):
     db.delete(series)
     db.commit()
     return {"message": "Series deleted successfully"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
