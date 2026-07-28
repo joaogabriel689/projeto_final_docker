@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS series (
     genero VARCHAR(100),
     temporadas INT,
     duracao INT
-);
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;;
 
 INSERT INTO series (titulo, descricao, ano_lancamento, diretor, genero, temporadas, duracao) VALUES
 ('Fronteiras do Silêncio', 'Um detetive investiga desaparecimentos em uma cidade isolada.', 2019, 'Marina Costa', 'Suspense', 3, 45),
@@ -21,3 +21,5 @@ INSERT INTO series (titulo, descricao, ano_lancamento, diretor, genero, temporad
 ('Herança Maldita', 'Irmãos disputam uma mansão assombrada pela morte do pai.', 2017, 'Renata Dias', 'Terror', 1, 40),
 ('Vidas Paralelas', 'Duas pessoas trocam de vida em universos alternativos.', 2025, 'Diego Martins', 'Ficção Científica', 2, 52),
 ('Café com Segredos', 'Uma jornalista investiga corrupção em uma pequena cidade.', 2016, 'Larissa Pinto', 'Suspense', 4, 44);
+
+ALTER TABLE series CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

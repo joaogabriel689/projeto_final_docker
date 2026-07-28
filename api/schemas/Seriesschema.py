@@ -14,6 +14,6 @@ class SeriesCreate(SeriesSchema):
     pass
 
 class SeriesUpdateSchema(SeriesSchema):
-    id: int
+    titulo: str
 
     model_config = ConfigDict(from_attributes=True)

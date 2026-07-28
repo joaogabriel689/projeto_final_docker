@@ -27,6 +27,7 @@ async def read_root(skip: int = 0, limit: int = 100, genero: str = None, ano_lan
     if ano_lancamento:
         query = query.filter(Series.ano_lancamento == ano_lancamento)
     series = query.offset(skip).limit(limit).all()
+    print(series)
     return series
 
 
@@ -40,16 +41,16 @@ async def create_series(series: SeriesCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/series/{series_id}", response_model=SeriesSchema)
-async def read_series(series_id: int, db: Session = Depends(get_db)):
-    series = db.query(Series).filter(Series.id == series_id).first()
+async def read_series(series_id: str, db: Session = Depends(get_db)):
+    series = db.query(Series).filter(Series.titulo == series_id).first()
     if series is None:
         raise HTTPException(status_code=404, detail="Series not found")
     return series
 
 
 @app.put("/series/{series_id}", response_model=SeriesSchema)
-async def update_series(series_id: int, updated_series: SeriesUpdateSchema, db: Session = Depends(get_db)):
-    series = db.query(Series).filter(Series.id == series_id).first()
+async def update_series(series_id: str, updated_series: SeriesUpdateSchema, db: Session = Depends(get_db)):
+    series = db.query(Series).filter(Series.titulo == series_id).first()
     if series is None:
         raise HTTPException(status_code=404, detail="Series not found")
 
@@ -62,8 +63,8 @@ async def update_series(series_id: int, updated_series: SeriesUpdateSchema, db: 
 
 
 @app.delete("/series/{series_id}")
-async def delete_series(series_id: int, db: Session = Depends(get_db)):
-    series = db.query(Series).filter(Series.id == series_id).first()
+async def delete_series(series_id: str, db: Session = Depends(get_db)):
+    series = db.query(Series).filter(Series.titulo   == series_id).first()
     if series is None:
         raise HTTPException(status_code=404, detail="Series not found")
 
