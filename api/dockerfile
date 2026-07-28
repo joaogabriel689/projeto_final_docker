@@ -1,10 +1,12 @@
-FROM python:3.12-slim
+# ---------- Stage 1: build ----------
+# Aqui ficam gcc, build-essential e os -dev packages, que só servem pra
+# compilar dependências Python com extensões nativas (ex: psycopg2).
+# Nada disso vai pra imagem final.
+FROM python:3.12-slim AS builder
 
 WORKDIR /api
 
-# 1. Instala dependências de compilação + curl (para o healthcheck) em uma única camada
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     gcc \
     build-essential \
     libpq-dev \
@@ -12,17 +14,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Copia e instala as dependências Python
 COPY requirements.txt .
+
+# Instala tudo dentro de um virtualenv isolado, pra copiar só ele no runtime
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. Cria o usuário de segurança não-root
+
+# ---------- Stage 2: runtime ----------
+# Imagem final: só as libs de runtime (não os -dev/compiladores) + o venv pronto.
+FROM python:3.12-slim AS runtime
+
+WORKDIR /api
+
+# curl fica aqui só se você usa em healthcheck; libpq5/libcurl4 são as libs
+# compartilhadas em runtime (sem os headers -dev, que só o build precisa).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpq5 \
+    libcurl4 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# 4. Copia os arquivos da aplicação definindo a posse para o appuser
+# Copia o virtualenv já com todas as dependências instaladas
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
 COPY --chown=appuser:appuser . .
 
-# 5. Alterna para o usuário seguro
 USER appuser
 
 EXPOSE 8000

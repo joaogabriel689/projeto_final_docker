@@ -1,13 +1,13 @@
 <?php
 require_once __DIR__ . '/../requests/requests.php';
 
-// Detecta se é edição (ex: /series/edit.php?id=5)
+
 $isEdit = isset($_GET['id']) && !empty($_GET['id']);
 $serieId = $_GET['id'] ?? null;
 $serie = null;
 $errorMessage = null;
 
-// Se for edição, busca os dados atuais da série para pré-preencher o form
+
 if ($isEdit && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $request = new SendRequest("http://api:8000/series/" . rawurlencode($serieId), 'GET');
     $response = $request->send();
@@ -19,7 +19,6 @@ if ($isEdit && $_SERVER['REQUEST_METHOD'] === 'GET') {
     }
 }
 
-// Processa o envio do formulário (tanto criação quanto edição)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $serieData = [
         'titulo'         => $_POST['titulo'] ?? '',
@@ -31,8 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'duracao'        => $_POST['duracao'] !== '' ? (int)$_POST['duracao'] : null,
     ];
 
-    // HTML não suporta PUT nativamente, então usamos um campo oculto "_method"
-    // para "disfarçar" o POST como PUT (method spoofing)
+
     $method = $_POST['_method'] ?? 'POST';
 
     if ($method === 'PUT' && $isEdit) {
@@ -55,7 +53,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $errorMessage = 'Erro ao ' . ($isEdit ? 'editar' : 'criar') . ' série: '
             . htmlspecialchars((string)$detail);
-        // Mantém os dados digitados no form em caso de erro
         $serie = $serieData;
     }
 }
