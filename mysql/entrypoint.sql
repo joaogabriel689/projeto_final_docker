@@ -23,3 +23,7 @@ INSERT INTO series (titulo, descricao, ano_lancamento, diretor, genero, temporad
 ('Café com Segredos', 'Uma jornalista investiga corrupção em uma pequena cidade.', 2016, 'Larissa Pinto', 'Suspense', 4, 44);
 
 ALTER TABLE series CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE USER IF NOT EXISTS 'backup_user'@'%' IDENTIFIED WITH mysql_native_password BY 'backup_password';
+GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER ON `database`.* TO 'backup_user'@'%';
+FLUSH PRIVILEGES;
