@@ -24,6 +24,12 @@ services:
         max-size: "10m"
         max-file: "3"
 
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
   db:
     image: mysql:8.4
     restart: unless-stopped
@@ -54,6 +60,11 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
 
   php:
     build: ./php
@@ -77,6 +88,11 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
 
   nginx:
     image: nginx:alpine
@@ -98,6 +114,11 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
 
   alpine:
     build:
@@ -121,6 +142,11 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
 
 volumes:
   mysql_data:

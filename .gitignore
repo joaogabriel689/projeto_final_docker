@@ -1,5 +1,13 @@
 .env
-*/venv
-alpine/backups
-logs/
+.env.*
+!.env.example
 
+venv/
+.venv/
+**/venv/
+**/.venv/
+
+__pycache__/
+*.pyc
+
+logs/
