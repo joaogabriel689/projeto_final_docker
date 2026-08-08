@@ -4,7 +4,8 @@ $id = $_GET['id'] ?? null;
 if (!$id) {
     die('Série não informada.');
 }
-$request = new SendRequest('http://api:8000/series/' . rawurlencode($id), 'DELETE');
+$url_api = getenv("ULR_API");
+$request = new SendRequest("$url_api/series/" . rawurlencode($id), 'DELETE');
 $response = $request->send();
 if ($response['status_code'] !== 200) {
     echo 'Erro ao excluir série: ' . htmlspecialchars($response['response']['message'] ?? 'Erro desconhecido');

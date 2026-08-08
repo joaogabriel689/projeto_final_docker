@@ -14,13 +14,13 @@
 
     <?php
     require_once __DIR__ . '/../requests/requests.php';
-
+    $url_api = getenv("URL_API");
     $id = $_GET['nome'] ?? null;
 
     if (!$id) {
         die('Série não informada.');
     }
-    $request = new SendRequest('http://api:8000/series/' . rawurlencode($id), 'GET');
+    $request = new SendRequest("$url_api/series/" . rawurlencode($id), 'GET');
     $response = $request->send();
     $s = $response['response'] ?? [];
     ?>

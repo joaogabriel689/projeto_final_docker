@@ -1,3 +1,5 @@
 .env
-api/venv
+*/venv
 alpine/backups
+logs/
+

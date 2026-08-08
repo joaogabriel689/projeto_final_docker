@@ -18,7 +18,8 @@
 
     <?php
     require_once __DIR__ . '/../requests/requests.php';
-    $request = new SendRequest('http://api:8000/');
+    $url_api = getenv("URL_API");
+    $request = new SendRequest("$url_api");
     $response = $request->send();
     ?>
 

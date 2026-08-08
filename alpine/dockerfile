@@ -6,22 +6,23 @@ RUN apk add --no-cache shellcheck
 
 WORKDIR /build
 COPY backup.sh .
+COPY restore.sh .
 COPY crontab.txt .
 
-# Falha o build cedo se o script tiver erro de sintaxe/bug comum
-RUN shellcheck backup.sh
+# Falha o build cedo se algum script tiver erro de sintaxe/bug comum
+RUN shellcheck backup.sh restore.sh
 
 # Garante que o crontab.txt não está vazio/ausente
 # (esse foi o bug crítico que pegamos no seu repo antes)
 RUN test -s crontab.txt || (echo "ERRO: crontab.txt vazio ou ausente" && exit 1)
 
-RUN chmod +x backup.sh
+RUN chmod +x backup.sh restore.sh
 
 
 ### STAGE 2: runtime ###
 FROM alpine:3.20
 
-# mysql-client -> fornece o mysqldump
+# mysql-client -> fornece o mysqldump e o mysql (usado pelo restore.sh)
 # tzdata -> permite fixar um timezone correto pro cron
 # dcron -> daemon de cron leve, padrão do Alpine
 # tini -> init mínimo; evita "setpgid: Operation not permitted"
@@ -29,6 +30,7 @@ RUN apk add --no-cache mysql-client tzdata dcron tini
 ENV TZ=America/Sao_Paulo
 
 COPY --from=builder /build/backup.sh /backup.sh
+COPY --from=builder /build/restore.sh /restore.sh
 COPY --from=builder /build/crontab.txt /etc/crontabs/root
 RUN chmod 600 /etc/crontabs/root
 

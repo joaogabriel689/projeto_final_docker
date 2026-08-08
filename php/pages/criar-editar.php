@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../requests/requests.php';
-
+$url_api = getenv('URL_API');
 
 $isEdit = isset($_GET['id']) && !empty($_GET['id']);
 $serieId = $_GET['id'] ?? null;
@@ -9,7 +9,7 @@ $errorMessage = null;
 
 
 if ($isEdit && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $request = new SendRequest("http://api:8000/series/" . rawurlencode($serieId), 'GET');
+    $request = new SendRequest("$url_api/series/" . rawurlencode($serieId), 'GET');
     $response = $request->send();
 
     if ($response['status_code'] === 200) {
@@ -34,10 +34,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $method = $_POST['_method'] ?? 'POST';
 
     if ($method === 'PUT' && $isEdit) {
-        $request = new SendRequest("http://api:8000/series/" . rawurlencode($serieId), 'PUT', $serieData);
+        $request = new SendRequest("$url_api/series/" . rawurlencode($serieId), 'PUT', $serieData);
         $successStatus = 200;
     } else {
-        $request = new SendRequest('http://api:8000/series/', 'POST', $serieData);
+        $request = new SendRequest("$url_api/series/", 'POST', $serieData);
         $successStatus = 200;
     }
 
