@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# Carrega as env vars gravadas pelo entrypoint.sh (mesma razão do backup.sh)
+
 [ -f /etc/container.env ] && . /etc/container.env
 
 BACKUP_DIR="/backups"

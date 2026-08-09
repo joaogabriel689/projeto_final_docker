@@ -19,3 +19,6 @@ backup:
 # Mostra o log de restores já feitos
 logs-restore:
 	docker compose exec alpine cat /var/log/alpine/restore.log
+
+tests:
+	docker compose exec alpine sh /load-test.sh

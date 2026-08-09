@@ -128,17 +128,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      nginx:
+        condition: service_started
     environment:
       MYSQL_HOST: ${MYSQL_HOST}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_BACKUP_PASSWORD: ${MYSQL_BACKUP_PASSWORD}
+      TARGET_URL: ${BASE_URL}
     networks:
+      - frontend
       - banco_dados
     volumes:
       - ./alpine/backups:/backups
       - ./logs/alpine:/var/log/alpine
+      - ./alpine/results:/results
     logging:
       driver: "json-file"
       options:
@@ -149,20 +154,95 @@ services:
         limits:
           cpus: "0.25"
           memory: 256M
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
 
-  phpmyadmin:
-    image: phpmyadmin:5.2.3-fpm
-    environment:
-      - MYSQL_USER=${MYSQL_USER}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-      - MYSQL_HOST=${MYSQL_HOST}
-      - MYSQL_PORT=${MYSQL_PORT}
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+    ports:
+      - "9090:9090"
+
     networks:
-      - banco_dados
-      - frontend
-      
+      - monitoring
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+
+    ports:
+      - "8081:8080"
+
+    networks:
+      - monitoring
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+
+    depends_on:
+      - prometheus
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+    networks:
+      - monitoring
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+
 volumes:
   mysql_data:
+  prometheus_data:
+  grafana_data:
+
 
 networks:
   frontend:
@@ -172,4 +252,6 @@ networks:
     internal: true
   banco_dados:
     internal: true
+    driver: bridge
+  monitoring:
     driver: bridge
