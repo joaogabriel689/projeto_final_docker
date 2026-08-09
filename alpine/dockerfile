@@ -7,16 +7,22 @@ RUN apk add --no-cache shellcheck
 WORKDIR /build
 COPY backup.sh .
 COPY restore.sh .
+COPY entrypoint.sh .
 COPY crontab.txt .
 
-# Falha o build cedo se algum script tiver erro de sintaxe/bug comum
-RUN shellcheck backup.sh restore.sh
+# Falha o build cedo se algum script tiver erro de sintaxe/bug comum.
+# -S error: só falha em erros reais, não em avisos de estilo (ex: SC1091
+# sobre /etc/container.env, que só existe em runtime, não no momento do lint)
+RUN shellcheck -S error backup.sh restore.sh entrypoint.sh
 
 # Garante que o crontab.txt não está vazio/ausente
 # (esse foi o bug crítico que pegamos no seu repo antes)
 RUN test -s crontab.txt || (echo "ERRO: crontab.txt vazio ou ausente" && exit 1)
 
-RUN chmod +x backup.sh restore.sh
+# Normaliza quebras de linha (protege contra CRLF se algum arquivo
+# foi editado/baixado no Windows) e garante permissão de execução
+RUN sed -i 's/\r$//' backup.sh restore.sh entrypoint.sh
+RUN chmod +x backup.sh restore.sh entrypoint.sh
 
 
 ### STAGE 2: runtime ###
@@ -29,10 +35,11 @@ FROM alpine:3.20
 RUN apk add --no-cache mysql-client tzdata dcron tini
 ENV TZ=America/Sao_Paulo
 
-COPY --from=builder /build/backup.sh /backup.sh
-COPY --from=builder /build/restore.sh /restore.sh
+COPY --from=builder --chmod=755 /build/backup.sh /backup.sh
+COPY --from=builder --chmod=755 /build/restore.sh /restore.sh
+COPY --from=builder --chmod=755 /build/entrypoint.sh /entrypoint.sh
 COPY --from=builder /build/crontab.txt /etc/crontabs/root
 RUN chmod 600 /etc/crontabs/root
 
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
 CMD ["crond", "-f", "-L", "/dev/stdout"]

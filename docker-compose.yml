@@ -31,7 +31,8 @@ services:
           memory: 512M
 
   db:
-    image: mysql:8.4
+    build: 
+      context: ./mysql
     restart: unless-stopped
     command: >
       --mysql-native-password=ON
@@ -46,7 +47,6 @@ services:
       MYSQL_BACKUP_PASSWORD: ${MYSQL_BACKUP_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./mysql/entrypoint.sql:/docker-entrypoint-initdb.d/01-init.sql
       - ./logs/mysql:/var/log/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u $$MYSQL_USER -p$$MYSQL_PASSWORD || exit 1"]
@@ -129,7 +129,9 @@ services:
       db:
         condition: service_healthy
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_BACKUP_PASSWORD: ${MYSQL_BACKUP_PASSWORD}
     networks:
@@ -148,6 +150,17 @@ services:
           cpus: "0.25"
           memory: 256M
 
+  phpmyadmin:
+    image: phpmyadmin:5.2.3-fpm
+    environment:
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_PORT=${MYSQL_PORT}
+    networks:
+      - banco_dados
+      - frontend
+      
 volumes:
   mysql_data:
 
