@@ -1,13 +1,18 @@
+#!/bin/sh
 set -e
 
+
+[ -f /etc/container.env ] && . /etc/container.env
+
 BACKUP_DIR="/backups"
-DB_HOST="db"
+DB_HOST="${MYSQL_HOST}"
 DB_NAME="${MYSQL_DATABASE}"
 LOG_FILE="/var/log/alpine/restore.log"
 
 
-DB_USER="root"
-DB_PASS="${MYSQL_ROOT_PASSWORD}"
+DB_USER="${MYSQL_USER}"
+DB_PASS="${MYSQL_PASSWORD}"
+
 
 
 ARG1="$1"
@@ -43,7 +48,7 @@ if [ "$SKIP_CONFIRM" != "1" ]; then
   fi
 fi
 
-
+# Snapshot de seguranca do estado atual antes de sobrescrever
 SAFETY_FILE="$BACKUP_DIR/pre_restore_${DB_NAME}_$(date +%Y%m%d_%H%M%S).sql"
 echo "Criando snapshot de seguranca em $SAFETY_FILE antes de restaurar..."
 mysqldump --no-tablespaces -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" > "$SAFETY_FILE"

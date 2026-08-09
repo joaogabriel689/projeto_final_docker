@@ -1,38 +1,44 @@
-### STAGE 1: build/validação ###
 FROM alpine:3.20 AS builder
 
-# shellcheck só existe nesta etapa - não vai pra imagem final
+
 RUN apk add --no-cache shellcheck
 
 WORKDIR /build
 COPY backup.sh .
 COPY restore.sh .
+COPY entrypoint.sh .
 COPY crontab.txt .
 
-# Falha o build cedo se algum script tiver erro de sintaxe/bug comum
-RUN shellcheck backup.sh restore.sh
 
-# Garante que o crontab.txt não está vazio/ausente
-# (esse foi o bug crítico que pegamos no seu repo antes)
+RUN shellcheck -S error backup.sh restore.sh entrypoint.sh
+
+
 RUN test -s crontab.txt || (echo "ERRO: crontab.txt vazio ou ausente" && exit 1)
 
-RUN chmod +x backup.sh restore.sh
+
+RUN sed -i 's/\r$//' backup.sh restore.sh entrypoint.sh
+RUN chmod +x backup.sh restore.sh entrypoint.sh
 
 
-### STAGE 2: runtime ###
+
 FROM alpine:3.20
 
-# mysql-client -> fornece o mysqldump e o mysql (usado pelo restore.sh)
-# tzdata -> permite fixar um timezone correto pro cron
-# dcron -> daemon de cron leve, padrão do Alpine
-# tini -> init mínimo; evita "setpgid: Operation not permitted"
+
 RUN apk add --no-cache mysql-client tzdata dcron tini
 ENV TZ=America/Sao_Paulo
 
-COPY --from=builder /build/backup.sh /backup.sh
-COPY --from=builder /build/restore.sh /restore.sh
+COPY --from=builder --chmod=755 /build/backup.sh /backup.sh
+COPY --from=builder --chmod=755 /build/restore.sh /restore.sh
+COPY --from=builder --chmod=755 /build/entrypoint.sh /entrypoint.sh
 COPY --from=builder /build/crontab.txt /etc/crontabs/root
 RUN chmod 600 /etc/crontabs/root
+RUN apk add --no-cache apache2-utils
 
-ENTRYPOINT ["/sbin/tini", "--"]
+COPY load-test.sh /load-test.sh
+
+RUN chmod +x /load-test.sh
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
+
+
+
 CMD ["crond", "-f", "-L", "/dev/stdout"]
