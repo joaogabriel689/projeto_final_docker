@@ -1,300 +1,408 @@
-# API Séries — Infraestrutura Docker
+# Projeto Final Docker — Containerização Segura de uma Aplicação Real em Produção Simulada
 
-Projeto de exemplo de infraestrutura containerizada com proxy reverso, frontend em PHP, API em Python, banco de dados e backup automatizado, seguindo boas práticas de segurança e performance (redes segregadas, resolução DNS interna, builds multistage, variáveis de ambiente, healthchecks).
+Stack containerizada de uma aplicação de catálogo de séries, empacotada e orquestrada com Docker Compose seguindo boas práticas de segurança, observabilidade e operação: rede segmentada, usuários não-root, banco sem porta publicada, healthchecks, limites de recursos, logs centralizados, backup/restore automatizado e stack de métricas.
+
+Repositório: [github.com/joaogabriel689/projeto_final_docker](https://github.com/joaogabriel689/projeto_final_docker)
+
+---
+
+## Sumário
+
+- [Stack](#stack)
+- [Setup](#setup)
+- [Execução](#execução)
+- [Arquitetura de rede](#arquitetura-de-rede)
+- [Segurança](#segurança)
+- [Recursos e healthchecks](#recursos-e-healthchecks)
+- [Logs](#logs)
+- [Backup e restore](#backup-e-restore)
+- [Teste de carga](#teste-de-carga)
+- [Monitoramento](#monitoramento)
+- [Troubleshooting](#troubleshooting)
+- [Rollback](#rollback)
+- [Estrutura de diretórios](#estrutura-de-diretórios)
+
+---
 
 ## Stack
 
-| Camada | Tecnologia |
-|---|---|
-| Proxy reverso | Nginx |
-| Frontend | PHP-FPM |
-| API | FastAPI (Python) |
-| Banco de dados | MySQL 8.4 |
-| Backup | Alpine + dcron + mysqldump |
+| Camada | Serviço | Tecnologia | Exposto no host? |
+|---|---|---|---|
+| Proxy reverso | `nginx` | Nginx (alpine) | `8080` |
+| Frontend | `php` | PHP-FPM 8.3 | não |
+| API | `api` | FastAPI (Python 3.12) | não |
+| Banco de dados | `db` | MySQL 8.4 | não |
+| Backup / restore / teste de carga | `alpine` | Alpine 3.20 + dcron + tini + mysql-client + Apache Bench | não |
+| Métricas | `prometheus` | Prometheus | `9090` |
+| Métricas de containers | `cadvisor` | cAdvisor | `8081` |
+| Dashboard | `grafana` | Grafana | `3000` |
+
+Requisitos mínimos do enunciado atendidos: Dockerfile otimizado (multistage na API), `docker-compose.yml`, volume nomeado persistente para o MySQL, proxy reverso (Nginx), banco sem porta publicada, usuários não-root em todos os serviços de aplicação, healthchecks, credenciais via `.env`, limites de CPU/memória por serviço, logs em pasta dedicada por serviço, backup e restore automatizados, e documentação de setup/execução/troubleshooting/rollback (este documento).
+
+Diferenciais implementados: stack de monitoramento (Prometheus + cAdvisor + Grafana) e teste de carga simples com `ab` (Apache Bench). Redis, Traefik, PHPMyAdmin e Portainer não fazem parte deste projeto.
 
 ---
 
-## Como subir o ambiente
+## Setup
 
 1. Clone o repositório:
    ```bash
-   git clone <url-do-repositorio>
-   cd api_series
+   git clone https://github.com/joaogabriel689/projeto_final_docker.git
+   cd projeto_final_docker
    ```
 
-2. Crie o arquivo `.env` a partir do exemplo:
+2. Crie o `.env` a partir do exemplo:
    ```bash
    cp .env.example .env
    ```
-   Edite o `.env` com as credenciais desejadas (usuário/senha do banco, senha do usuário de backup, etc.).
 
-3. Suba os containers:
-   ```bash
-   docker compose up -d
-   ```
+3. Preencha o `.env`. Variáveis obrigatórias:
 
-   O `-d` roda em background. Na primeira vez, o Docker também vai buildar as imagens (`php`, `api`, `alpine`) automaticamente. Se quiser forçar rebuild (por exemplo, depois de alterar um `Dockerfile`):
-   ```bash
-   docker compose up -d --build
-   ```
+   | Variável | Descrição |
+   |---|---|
+   | `MYSQL_ROOT_PASSWORD` | Senha do usuário `root` do MySQL |
+   | `MYSQL_DATABASE` | Nome do schema da aplicação |
+   | `MYSQL_USER` | Usuário de aplicação (usado pela API e pelo restore) |
+   | `MYSQL_PASSWORD` | Senha do usuário de aplicação |
+   | `MYSQL_HOST` | Hostname do banco dentro da rede Docker — use `db` |
+   | `MYSQL_PORT` | Porta interna do MySQL — use `3306` |
+   | `MYSQL_BACKUP_PASSWORD` | Senha do usuário `backup_user`, usado só pelo `mysqldump` |
+   | `BASE_URL` | URL alvo do teste de carga (padrão: `http://nginx:80/`) |
+   | `URL_API` | URL que o PHP usa para chamar a API (padrão: `http://api:8000/`) |
 
-4. Acesse `http://localhost:8080` no navegador.
+   O arquivo `.env` nunca é versionado (está no `.gitignore`); só o `.env.example`, com placeholders, vai para o Git. Essa é a estratégia de segredos adotada no projeto — aceita pelo enunciado como estratégia segura para credenciais.
 
-## Como parar o ambiente
-
-```bash
-docker compose down
-```
-
-Isso para e remove os containers e as redes, mas **mantém os volumes** — os dados do banco e os backups já gerados continuam intactos pra próxima vez que você subir o projeto.
-
-## Como apagar volumes
-
-Se quiser resetar o banco do zero (perde todos os dados, incluindo o schema criado pelos scripts de init):
-
-```bash
-docker compose down -v
-```
-
-A flag `-v` remove também os volumes nomeados declarados no `docker-compose.yml` (o volume de dados do MySQL). Use com cuidado — não tem como desfazer. Os arquivos de backup em `./alpine/backups` **não** são apagados por isso, já que esse é um bind mount pra uma pasta local, não um volume nomeado.
-
-Pra remover um volume específico sem derrubar tudo:
-```bash
-docker volume ls
-docker volume rm <nome-do-volume>
-```
+4. Nenhum passo manual além disso: os usuários do banco (`MYSQL_USER` e `backup_user`) e o schema inicial são criados automaticamente pelos scripts em `mysql/docker-entrypoint-initdb.d/` na primeira subida do container `db`.
 
 ---
 
-## Como acessar o frontend
+## Execução
 
-O Nginx expõe a porta `8080` do host, mapeada pra porta `80` interna do container:
+Subir tudo (builda as imagens automaticamente na primeira vez):
+
+```bash
+docker compose up -d
+```
+
+Forçar rebuild depois de alterar um Dockerfile:
+
+```bash
+docker compose up -d --build
+```
+
+Acessar a aplicação:
 
 ```
 http://localhost:8080
 ```
 
-Todas as rotas (`/home`, `/serie`, `/criar-editar`, `/delete`) passam por aí. O Nginx recebe a requisição, serve arquivos estáticos diretamente (CSS, imagens) e repassa requisições `.php` pro PHP-FPM via FastCGI na rede interna.
-
-## Como testar a API internamente
-
-A API **não expõe porta pro host** — só é acessível de dentro da rede Docker. Pra testar diretamente, sem passar pelo frontend:
+Ver o status de saúde de cada serviço (útil para confirmar que tudo subiu corretamente, não só que está "rodando"):
 
 ```bash
-docker exec -it php sh
-curl http://api:8000/health
+docker compose ps
 ```
 
-Ou pra listar as séries:
+Parar o ambiente mantendo dados e backups:
+
 ```bash
-curl http://api:8000/
+docker compose down
 ```
 
-Também dá pra rodar pelo container da própria API:
+Resetar completamente o banco (perde todos os dados — os backups em `./alpine/backups` não são afetados, pois é bind mount, não volume nomeado):
+
 ```bash
-docker exec -it api sh
-curl http://localhost:8000/health
+docker compose down -v
 ```
 
-A documentação interativa do FastAPI (Swagger) também só é acessível de dentro da rede:
-```bash
-docker exec -it php sh
-curl http://api:8000/docs
-```
+### Testar a API diretamente (sem passar pelo frontend)
 
-## Como ver logs
+A API não expõe porta para o host — só é alcançável de dentro da rede Docker:
 
-Logs de todos os serviços, em tempo real:
 ```bash
-docker compose logs -f
-```
-
-Logs de um serviço específico:
-```bash
-docker compose logs -f api
-docker compose logs -f php
-docker compose logs -f nginx
-docker compose logs -f db
-docker compose logs -f alpine
-```
-
-Sem o `-f` (follow), mostra o histórico e sai, em vez de continuar acompanhando:
-```bash
-docker compose logs api
+docker compose exec php sh -c "curl http://api:8000/health"
+docker compose exec php sh -c "curl http://api:8000/"
 ```
 
 ---
 
-## Como funcionam as redes
+## Arquitetura de rede
 
-O projeto usa **três redes Docker isoladas**, cada uma conectando apenas os serviços que realmente precisam se comunicar entre si. Nenhum serviço enxerga uma rede da qual não faz parte — é esse encadeamento que garante que, por exemplo, o Nginx nunca alcance o banco diretamente.
+Quatro redes Docker, cada uma conectando só os serviços que precisam se falar. `backend` e `banco_dados` são redes internas (`internal: true`) — não têm rota para a internet nem para fora do host, o que reduz ainda mais a superfície de ataque caso um container dessas redes seja comprometido.
 
 ```
-Navegador → nginx ─┬─ (frontend) ─┬─ php ─┬─ (backend) ─┬─ api ─┬─ (banco_dados) ─┬─ db
-                    └──────────────┘       └─────────────┘       └──────────────────┘
+Navegador → nginx ─(frontend)─ php ─(backend, internal)─ api ─(banco_dados, internal)─ db
+                                                                                          alpine (backup/restore)
+prometheus ─(monitoring)─ cadvisor
+     └────────────────────────────── grafana
 ```
 
-### Rede `frontend`
+| Rede | Serviços | `internal` | Propósito |
+|---|---|---|---|
+| `frontend` | `nginx`, `php` | não | Única rede com porta publicada (`nginx:8080`). PHP-FPM recebe requisições FastCGI só do Nginx. |
+| `backend` | `php`, `api` | sim | PHP chama a API via `http://api:8000`. Nginx e `db` não participam — não há rota direta entre eles. |
+| `banco_dados` | `api`, `db`, `alpine` | sim | Só quem precisa falar com o MySQL está aqui: a API (CRUD) e o `alpine` (`mysqldump`/restore). |
+| `monitoring` | `prometheus`, `cadvisor`, `grafana` | não | Isolada do resto da stack — métricas de infraestrutura não têm rota para a aplicação. |
 
-Conecta **apenas** `nginx` e `php`.
-
-- O `nginx` é o único serviço com porta publicada pro host (`8080:80`).
-- O `php` (PHP-FPM) fica nessa rede pra receber requisições FastCGI do `nginx`, mas **não tem porta publicada** — só é alcançável pelo próprio `nginx`, via o nome do serviço (`php:9000`) resolvido pelo DNS interno do Docker.
-
-Isola a camada de apresentação: só o Nginx é exposto externamente; o PHP nunca é acessado diretamente de fora.
-
-### Rede `backend`
-
-Conecta **apenas** `php` e `api`.
-
-- O `php` está em **duas redes** (`frontend` e `backend`), porque precisa: (1) receber requisições do Nginx (rede `frontend`) e (2) fazer chamadas HTTP pra API (rede `backend`).
-- A `api` está em **duas redes** também (`backend` e `banco_dados`), pelo mesmo motivo: precisa ser alcançada pelo `php` e, ao mesmo tempo, alcançar o banco.
-- O `nginx` e o `db` **não** estão nessa rede — cada um só participa das redes que sua função exige.
-
-### Rede `banco_dados`
-
-Conecta `api`, `db` e o serviço de backup (`alpine`).
-
-- A `api` está aqui pra poder consultar/gravar dados no `db`.
-- O `db` (MySQL) fica isolado nessa rede — não é alcançado por `nginx` nem por `php`, só pela `api` e pelo serviço de backup.
-- O `alpine` (container de backup) também precisa estar nessa rede, já que ele roda `mysqldump` diretamente contra o `db`, fora do fluxo normal de requisições da aplicação.
-
-Essa segmentação em três camadas segue o princípio de menor privilégio: um serviço comprometido no `nginx`, por exemplo, não tem rota de rede nenhuma até o `db` — precisaria primeiro comprometer o `php` e depois a `api` pra sequer alcançar a rede onde o banco vive.
-
-## Por que o banco não tem porta publicada
-
-O `db` (MySQL) não define `ports:` no `docker-compose.yml` — só existe dentro da rede interna Docker (`banco_dados`).
-
-Motivos:
-
-1. **Superfície de ataque reduzida.** Se a porta do MySQL fosse publicada (`3306:3306`), qualquer processo ou usuário na máquina host (ou, em produção, qualquer host que alcance a rede) poderia tentar se conectar diretamente ao banco, contornando toda a lógica de validação e autorização da API.
-2. **Não é necessário.** Os únicos serviços que precisam falar com o banco são a `api` e o serviço de backup (`alpine`), e ambos já estão na mesma rede Docker (`banco_dados`) — a comunicação acontece via o nome do serviço (`db:3306`), resolvido pelo DNS interno, sem precisar expor nada pro host.
-3. **Princípio de menor privilégio.** Cada camada só deve poder acessar exatamente o que precisa. O banco de dados é o recurso mais sensível da stack (contém todos os dados); mantê-lo inacessível de fora da rede Docker é uma das defesas mais baratas e eficazes que existem.
-
-Pra inspecionar o banco durante desenvolvimento, sem publicar a porta, use `docker exec` pra entrar no container:
-```bash
-docker exec -it db mysql -u <user> -p<senha> <database>
-```
-
-## Por que o PHP usa http://api:8000
-
-Dentro do `docker-compose.yml`, o serviço da API é declarado com o nome `api`:
-
-```yaml
-services:
-  api:
-    build: ./api
-    ...
-```
-
-O Docker Compose cria automaticamente uma **rede interna com resolução DNS** entre os serviços que compartilham uma mesma rede declarada. Isso significa que, de dentro de qualquer container na rede `backend`, o hostname `api` resolve automaticamente pro IP interno do container da API — sem precisar hardcodar IPs (que mudam a cada `docker compose up`) e sem precisar publicar porta nenhuma pro host.
-
-Por isso o PHP faz suas chamadas para:
-```
-http://api:8000
-```
-em vez de `http://localhost:8000` (que apontaria pro próprio container do PHP, não pra API) ou um IP fixo (que quebraria a cada rebuild).
-
-A porta `8000` é a porta **interna** que o Uvicorn expõe dentro do container da API (`EXPOSE 8000` no `Dockerfile` da API) — não precisa estar mapeada pro host, porque a comunicação PHP → API acontece inteiramente dentro da rede Docker.
+`php` está em duas redes (`frontend` + `backend`) e `api` está em duas redes (`backend` + `banco_dados`), porque cada um precisa ser alcançado de um lado e alcançar o próximo do outro. Esse encadeamento garante, por exemplo, que o Nginx nunca tenha rota até o banco — precisaria comprometer primeiro o PHP e depois a API.
 
 ---
 
-## Backup automatizado do banco
+## Segurança
 
-O serviço `alpine` (container `mysql_backup_cron`) roda um daemon `crond` que dispara `mysqldump` periodicamente contra o `db`, salvando os dumps em `.sql` num volume local (`./alpine/backups`), fora do container.
+- **Banco sem porta publicada.** O `db` não declara `ports:` — só existe dentro da rede `banco_dados`, que é `internal`. Para inspecionar em desenvolvimento, use `docker compose exec db mysql -u <user> -p`.
+- **Usuários não-root.** `api` roda como `appuser` (criado no Dockerfile multistage), `php` roda como `appuser` (uid 1000), e `alpine` roda `crond` sob `tini` como PID 1 (evita o container rodar como root desnecessariamente em processos longos).
+- **Usuário de backup dedicado com privilégio mínimo.** O `mysqldump` do serviço `alpine` usa `backup_user`, criado pelo `mysql-native-password` só com os grants necessários para dump — nunca o `root` do MySQL. O restore, por sua vez, usa `MYSQL_USER` (o usuário de aplicação), suficiente para reescrever os dados sem precisar de credenciais administrativas.
+- **`mysql-native-password` ligado propositalmente.** O MySQL 8.4 desativa esse plugin por padrão, mas o `mysql-client` do Alpine (fork MariaDB) não autentica com o plugin padrão (`caching_sha2_password`). Isso é ligado explicitamente via `command:` no `docker-compose.yml`.
+- **Segredos via `.env`.** Aceito pelo enunciado como estratégia segura; nenhuma credencial fica hardcoded em Dockerfile, compose ou código-fonte.
+- **Build multistage na API.** O estágio `builder` tem `gcc`, `build-essential` e headers `-dev` para compilar dependências com extensões nativas; nenhum desses pacotes vai para a imagem final — só o virtualenv já compilado é copiado para o estágio `runtime`, reduzindo superfície de ataque e tamanho de imagem.
+- **Bloqueio de arquivos sensíveis no Nginx.** O `default.conf` nega acesso a dotfiles e arquivos `.bkp` (`location ~ /\.(?!well-known).*|.*\.bkp$`), evitando exposição acidental de `.env`, `.git` etc. caso algum arquivo desses acabe dentro do `webroot`.
+- **Segmentação de rede como defesa em profundidade** — ver seção anterior.
 
-### Como funciona
+---
 
-- **Imagem**: Alpine mínima, com `mysql-client` (cliente MariaDB, usado pelo `mysqldump`), `tzdata` (timezone correto pro agendamento), `dcron` (daemon de cron) e `tini` (init leve, evita erro de `setpgid` ao rodar `crond` como PID 1).
-- **Agendamento**: definido em `crontab.txt`, copiado pra `/etc/crontabs/root` dentro do container.
-- **Script**: `backup.sh` roda o `mysqldump` com um usuário dedicado (`backup_user`), gera um arquivo `.sql` com timestamp e grava em `/backups` (mapeado pro host via volume).
-- **Rede**: o `alpine` está na rede `banco_dados`, a única que dá acesso ao `db` — nenhuma outra rede consegue alcançá-lo.
+## Recursos e healthchecks
 
-### Usuário de backup dedicado
+Todos os serviços de aplicação definem `deploy.resources.limits` (CPU e memória), evitando que um serviço com vazamento ou pico de carga derrube o host inteiro:
 
-O backup **não usa o `root`** do MySQL. Existe um usuário `backup_user`, criado no script de inicialização do banco, com permissão mínima necessária pro `mysqldump` funcionar (`SELECT`, `LOCK TABLES`, `SHOW VIEW`, `EVENT`, `TRIGGER`) — sem privilégios de escrita ou administração.
+| Serviço | CPU | Memória |
+|---|---|---|
+| `api` | 0.50 | 512M |
+| `db` | 1.0 | 1G |
+| `php` | 0.50 | 512M |
+| `nginx` | 0.25 | 256M |
+| `alpine` | 0.25 | 256M |
+| `prometheus` | 0.50 | 512M |
+| `cadvisor` | 0.50 | 512M |
+| `grafana` | 0.50 | 512M |
 
-Dois detalhes importantes de compatibilidade, caso o `db` precise ser recriado do zero algum dia:
+> Nota: `deploy.resources.limits` é aplicado nativamente pelo Docker Compose (Compose v2) rodando fora do modo Swarm — o Compose já traduz esses limites para `--cpus`/`--memory` do runtime.
 
-1. O MySQL 8.4 desativa o plugin `mysql_native_password` por padrão. O `docker-compose.yml` liga esse plugin explicitamente no serviço `db` (`command: --mysql-native-password=ON`), porque o `mysql-client` do Alpine (que é, na verdade, um fork do MariaDB) não sabe autenticar com o plugin padrão do MySQL 8 (`caching_sha2_password`).
-2. `database` é o nome do schema usado no ambiente de exemplo — e é também uma palavra reservada em SQL. Por isso o `GRANT` no script de init referencia o nome do banco entre crases (`` `database` ``), não sem escape.
+Healthchecks garantem que a ordem de subida respeite prontidão real, não só o container estar de pé:
 
-### Testar o backup manualmente
+- `db`: `mysqladmin ping` a cada 5s (10 tentativas) — a `api` só sobe depois que o `db` reporta `healthy` (`depends_on: condition: service_healthy`).
+- `api`: `curl` no endpoint `/health` a cada 30s — `php` só sobe depois que `db` **e** `api` estão saudáveis.
+- `nginx` e `alpine` dependem de `php`/`db` estarem prontos via `depends_on`, sem healthcheck próprio adicional.
 
-Sem esperar o próximo disparo do cron:
+---
 
-```bash
-docker compose exec alpine sh -c \
-  "mysqldump --no-tablespaces -h db -u backup_user -p'${MYSQL_BACKUP_PASSWORD}' ${MYSQL_DATABASE} > /tmp/teste.sql && echo OK"
+## Logs
+
+Cada serviço grava logs em uma subpasta dedicada de `./logs/`, montada como bind mount — acessível diretamente do host sem precisar de `docker logs`:
+
+```
+logs/
+├── api/
+├── mysql/       # general.log e error.log, habilitados via `command:` no db
+├── php-fpm/
+├── nginx/       # access.log e error.log
+└── alpine/      # restore.log (gerado pelo restore.sh)
 ```
 
-### Ver os backups gerados
+Todos os serviços também usam o driver `json-file` com rotação (`max-size: 10m`, `max-file: 3`), evitando que logs cresçam sem limite e encham o disco do host.
+
+Ver logs em tempo real:
 
 ```bash
-docker compose exec alpine ls -lh /backups
+docker compose logs -f            # todos os serviços
+docker compose logs -f api        # um serviço específico
 ```
 
-Ou diretamente no host, já que é um bind mount:
-```bash
-ls -lh ./alpine/backups
-```
-
-### Ver o log do cron
+O log do cron de backup fica em `./alpine/backups/cron.log` (não em `./logs/`, pois está atrelado ao volume de backups):
 
 ```bash
 docker compose exec alpine cat /backups/cron.log
 ```
 
-### Restaurar um backup
+---
+
+## Backup e restore
+
+O serviço `alpine` (container `mysql_backup_cron`) roda `crond` sob `tini`, disparando `backup.sh` a cada 4 horas (`crontab.txt`: `* */4 * * *`). Os dumps `.sql` ficam em `./alpine/backups/`, fora do container.
+
+### Comandos via Makefile
 
 ```bash
-docker compose exec -i alpine sh -c \
-  "gunzip -c /backups/<nome_do_arquivo>.sql.gz | mysql -h db -u root -p'${MYSQL_ROOT_PASSWORD}' ${MYSQL_DATABASE}"
+make backup           # dispara um backup manual imediato
+make restore           # restaura o backup mais recente, com confirmação interativa
+make restore-latest    # restaura o mais recente SEM pedir confirmação
+make restore-file FILE=database_20260808_150501.sql   # restaura um arquivo específico
+make logs-restore      # mostra o histórico de restores já executados
 ```
 
-(ou, se o arquivo não estiver compactado, troque `gunzip -c arquivo.sql.gz |` por `< arquivo.sql`)
+### Como o restore funciona (`restore.sh`)
 
-⚠️ Restaurar um backup **sobrescreve** os dados atuais do banco — não existe confirmação automática nesse comando, então confira o nome do arquivo com cuidado antes de rodar.
+1. Resolve qual arquivo restaurar: o passado como argumento, ou o mais recente em `/backups` que bater com o padrão `${MYSQL_DATABASE}_*.sql`.
+2. Pede confirmação digitando `sim`, a menos que rodado com `--yes`.
+3. **Antes de sobrescrever, cria automaticamente um snapshot de segurança** do estado atual (`pre_restore_<db>_<timestamp>.sql`) — se o restore for para o arquivo errado, ainda dá para reverter a partir desse snapshot.
+4. Restaura o dump escolhido com `mysql -h db -u $MYSQL_USER ...` e registra o evento em `/var/log/alpine/restore.log`.
+
+> ⚠️ Restore sobrescreve os dados atuais do banco. O snapshot de segurança automático é a rede de proteção — confirme o nome do arquivo antes de aceitar o prompt.
+
+### Comandos manuais (sem Makefile)
+
+```bash
+# Backup manual
+docker compose exec alpine sh /backup.sh
+
+# Listar backups disponíveis
+docker compose exec alpine ls -lh /backups
+ls -lh ./alpine/backups        # equivalente, direto no host (bind mount)
+
+# Restore manual de um arquivo específico
+docker compose exec alpine sh /restore.sh database_20260808_150501.sql
+```
 
 ---
 
-## Estrutura de diretórios (referência)
+## Teste de carga
+
+O mesmo container `alpine` inclui Apache Bench (`ab`) e um script (`load-test.sh`) que roda três rodadas contra `$BASE_URL` (padrão `http://nginx:80/`, resolvido internamente via rede Docker): 100 requisições/5 conexões, 1000/20 e 5000/50.
+
+```bash
+make tests
+```
+
+O resultado é salvo em `./alpine/results/latest.txt`:
+
+```bash
+cat ./alpine/results/latest.txt
+```
+
+---
+
+## Monitoramento
+
+Stack de observabilidade isolada na rede `monitoring`:
+
+- **cAdvisor** (`http://localhost:8081`) — coleta métricas de uso de CPU/memória/rede de cada container, lendo diretamente do host (`/rootfs`, `/sys`, `/var/lib/docker` montados como somente-leitura).
+- **Prometheus** (`http://localhost:9090`) — faz scrape de si mesmo e do cAdvisor a cada 15s (`prometheus/prometheus.yml`), com volume nomeado (`prometheus_data`) para persistir a série temporal entre reinícios.
+- **Grafana** (`http://localhost:3000`) — dashboard para visualizar as métricas coletadas pelo Prometheus (adicionar o Prometheus como data source, apontando para `http://prometheus:9090`, dentro da rede `monitoring`). Volume nomeado `grafana_data` persiste dashboards e configuração.
+
+---
+
+## Troubleshooting
+
+**`db` nunca fica `healthy` / `api` trava em "waiting"**
+Confira `docker compose logs db`. Causas comuns: `MYSQL_ROOT_PASSWORD`/`MYSQL_USER`/`MYSQL_PASSWORD` vazios ou não definidos no `.env` (os scripts de init falham explicitamente com `ERRO: ... não definida.`), ou volume `mysql_data` de uma execução anterior com senha diferente da atual — nesse caso os scripts de `docker-entrypoint-initdb.d/` só rodam na primeira inicialização de um volume vazio, então uma senha trocada no `.env` não é aplicada a um volume já existente.
+```bash
+docker compose logs db
+docker compose exec db mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "SELECT user, host, plugin FROM mysql.user;"
+```
+
+**Erro de autenticação do `mysqldump`/backup (`Authentication plugin ... cannot be loaded`)**
+O `db` precisa estar com `--mysql-native-password=ON` (já definido no `command:` do `docker-compose.yml`). Se o problema persistir após recriar o container, o volume `mysql_data` pode ter sido criado antes dessa flag existir — nesse caso, `backup_user` precisa ser recriado com `mysql_native_password` explicitamente.
+
+**PHP retorna 502 Bad Gateway**
+Geralmente o `php` ainda não subiu ou caiu. Verifique:
+```bash
+docker compose ps php
+docker compose logs php
+```
+Se o container está saudável mas o Nginx ainda erra, confira se `fastcgi_pass php:9000` resolve — teste com `docker compose exec nginx getent hosts php`.
+
+**PHP não consegue falar com a API**
+`URL_API` no `.env` precisa ser `http://api:8000/` (nome do serviço, não `localhost`). Teste de dentro do container:
+```bash
+docker compose exec php sh -c "curl -v http://api:8000/health"
+```
+
+**Backup não está rodando no horário esperado**
+```bash
+docker compose exec alpine crontab -l          # confirma o agendamento carregado
+docker compose exec alpine cat /backups/cron.log
+docker compose logs alpine
+```
+Rode `make backup` para descartar problema de agendamento e confirmar que o script em si funciona.
+
+**Mudanças no `.env` não têm efeito**
+Variáveis de ambiente são lidas na criação do container, não a cada `up`. Depois de editar o `.env`:
+```bash
+docker compose up -d --force-recreate
+```
+
+**Quero ver o estado real de um container que não sobe**
+```bash
+docker compose logs --tail=100 <serviço>
+docker compose exec <serviço> sh   # ou bash, dependendo da imagem
+```
+
+---
+
+## Rollback
+
+O `restore.sh` já cria um snapshot de segurança (`pre_restore_*.sql`) automaticamente antes de qualquer restore — esse é o mecanismo de rollback de dados:
+
+```bash
+# Reverter para o estado anterior ao último restore
+docker compose exec alpine ls -t /backups/pre_restore_*.sql | head -n1
+docker compose exec alpine sh /restore.sh <nome_do_snapshot_pre_restore>.sql
+```
+
+Para rollback de **código/imagem** (ex.: um `--build` quebrou algo):
+
+```bash
+git log --oneline                  # identifica o commit anterior estável
+git checkout <commit_ou_tag_anterior>
+docker compose up -d --build       # reconstrói as imagens a partir do código revertido
+```
+
+Como `db` usa volume nomeado persistente (`mysql_data`), um rollback de código **não** reverte dados — só a aplicação. Para reverter dados junto, combine com o restore de um backup anterior ao problema.
+
+Para descartar completamente o ambiente e recomeçar do zero (perde dados do banco, mantém backups em `./alpine/backups` por serem bind mount):
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+---
+
+## Estrutura de diretórios
 
 ```
-api_series/
+projeto_final_docker/
 ├── docker-compose.yml
+├── makefile
 ├── .env.example
 ├── api/
-│   ├── Dockerfile          # multistage: builder (compila deps) + runtime (imagem enxuta)
+│   ├── dockerfile              # multistage: builder (compila deps) + runtime (imagem enxuta, non-root)
 │   ├── main.py
+│   ├── docker.py
 │   ├── requirements.txt
 │   ├── database/
 │   ├── models/
 │   └── schemas/
 ├── php/
-│   ├── Dockerfile
-│   └── pages/
-│       ├── home.php
-│       ├── serie.php
-│       ├── criar-editar.php
-│       ├── delete.php
-│       └── 404.php
+│   ├── dockerfile
+│   ├── pages/
+│   │   ├── home.php
+│   │   ├── serie.php
+│   │   ├── criar-editar.php
+│   │   ├── delete.php
+│   │   └── 404.php
+│   ├── public/
+│   │   ├── index.php
+│   │   └── style.css
+│   └── requests/
+│       └── requests.php
 ├── nginx/
-│   └── default.conf
+│   ├── default.conf
+│   └── style.css
+├── mysql/
+│   ├── dockerfile
+│   └── docker-entrypoint-initdb.d/
+│       ├── 01-create_user.sh   # cria MYSQL_USER e backup_user com privilégio mínimo
+│       └── 02-entrypoint.sql   # schema + seed inicial
 ├── alpine/
-│   ├── Dockerfile
+│   ├── dockerfile              # multistage: builder valida scripts com shellcheck
+│   ├── entrypoint.sh
 │   ├── backup.sh
+│   ├── restore.sh
+│   ├── load-test.sh
 │   ├── crontab.txt
-│   └── backups/            # volume local com os dumps gerados
-└── db/
-    └── init/                # scripts de entrypoint (schema, seed inicial e criação do backup_user)
-```
-
-## Healthchecks
-
-Cada serviço com dependência crítica define um healthcheck no `docker-compose.yml`, permitindo que o Docker Compose saiba quando um serviço está de fato pronto pra receber tráfego (não só "rodando", mas "respondendo corretamente"). Isso é usado com `depends_on: condition: service_healthy`, garantindo que, por exemplo, a `api` só sobe depois que o `db` está saudável, e o `php`/`nginx` só sobem depois que a `api` está de pé.
-
-Pra ver o status de saúde de cada container:
-```bash
-docker compose ps
+│   ├── backups/                # bind mount — dumps .sql e snapshots pre_restore
+│   └── results/                # bind mount — resultado do teste de carga
+├── prometheus/
+│   └── prometheus.yml
+└── logs/                       # bind mount — logs por serviço (api, mysql, php-fpm, nginx)
 ```
