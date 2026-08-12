@@ -5,7 +5,7 @@ from typing import List
 from database.database import SessionLocal, engine
 from models.Seriesmodel import Series, Base
 from schemas.Seriesschema import SeriesSchema, SeriesCreate, SeriesUpdateSchema
-import docker
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -77,7 +77,3 @@ async def delete_series(series_id: str, db: Session = Depends(get_db)):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-
-
-@app.get("/containers")
-async def list_containers():
