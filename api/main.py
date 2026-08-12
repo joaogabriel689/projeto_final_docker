@@ -5,7 +5,7 @@ from typing import List
 from database.database import SessionLocal, engine
 from models.Seriesmodel import Series, Base
 from schemas.Seriesschema import SeriesSchema, SeriesCreate, SeriesUpdateSchema
-import docker
+
 
 Base.metadata.create_all(bind=engine)
 
