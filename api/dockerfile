@@ -1,7 +1,3 @@
-# ---------- Stage 1: build ----------
-# Aqui ficam gcc, build-essential e os -dev packages, que só servem pra
-# compilar dependências Python com extensões nativas (ex: psycopg2).
-# Nada disso vai pra imagem final.
 FROM python:3.12-slim AS builder
 
 WORKDIR /api
@@ -16,20 +12,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 
-# Instala tudo dentro de um virtualenv isolado, pra copiar só ele no runtime
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
-
-# ---------- Stage 2: runtime ----------
-# Imagem final: só as libs de runtime (não os -dev/compiladores) + o venv pronto.
 FROM python:3.12-slim AS runtime
 
 WORKDIR /api
 
-# curl fica aqui só se você usa em healthcheck; libpq5/libcurl4 são as libs
-# compartilhadas em runtime (sem os headers -dev, que só o build precisa).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libpq5 \
@@ -38,7 +28,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Copia o virtualenv já com todas as dependências instaladas
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

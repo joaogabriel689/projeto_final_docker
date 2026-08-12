@@ -77,7 +77,3 @@ async def delete_series(series_id: str, db: Session = Depends(get_db)):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-
-
-@app.get("/containers")
-async def list_containers():
