@@ -1,14 +1,8 @@
-# Dockerfile
+
 FROM mysql:8.4
 
-# Copia os scripts de inicialização para dentro da imagem.
-# A imagem oficial do MySQL executa tudo que estiver em
-# /docker-entrypoint-initdb.d/ (em ordem alfabética) na primeira
-# inicialização do container, quando o diretório de dados está vazio.
+
 COPY docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/
 
-# Garante que o script shell tem permissão de execução
-RUN chmod +x /docker-entrypoint-initdb.d/01-create_user.sh
 
-# Não é necessário sobrescrever ENTRYPOINT/CMD: a imagem base já usa
-# docker-entrypoint.sh e "mysqld" por padrão.
+RUN chmod +x /docker-entrypoint-initdb.d/01-create_user.sh
